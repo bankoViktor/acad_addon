@@ -16,9 +16,6 @@ namespace Addon.Infrastructure
         public const double Inch_1_16 = 0.0625d;
         public const double Inch_1_32 = 0.03125d;
         public const double Inch_1_64 = 0.015625d;
-        public const double Inch_21_256 = 0.08203125d;
-        public const double Inch_21_512 = 0.041015625d;
-
         public static void AddBlockDefinitionFromDwg(Database db, string blockPath)
         {
             var blkDb = new Database(false, true);

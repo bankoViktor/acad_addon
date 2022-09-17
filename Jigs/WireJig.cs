@@ -4,13 +4,23 @@ using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.GraphicsInterface;
 using Autodesk.AutoCAD.Runtime;
 using System;
-using System.Windows.Forms;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 namespace Addon.Jigs
 {
     public class WireJig : DrawJig
     {
+        private const double ellipseWidth = 0.0747;
+        private const double ellipseHeight = 0.0373;
+        private const double cornerRadius = Utility.Inch_1_16;
+        private const double minLineAfterCorner = Utility.Inch_1_16;
+        private const string KW_Inverse = "Inverse";
+        private const string KW_Inverse2 = "iNnverse";
+        private const string KW_Offset = "Offset";
+
+
+        private double _textOffset = Utility.Inch_1_16;
+        private bool _inverse = false;
         private Point3d _basePoint;
         private Point3d _lastPoint;
         private const int _jigFactorCount = 2;
@@ -18,6 +28,7 @@ namespace Addon.Jigs
 
 
         private Editor AcEditor => AcadApp.DocumentManager.MdiActiveDocument.Editor;
+
 
         protected override SamplerStatus Sampler(JigPrompts prompts)
         {
@@ -28,11 +39,8 @@ namespace Addon.Jigs
             {
                 case 1:
                     // Obtaining an insert point
-                    ppo = new JigPromptPointOptions("\nInsertion point: ")
+                    ppo = new JigPromptPointOptions("\nSpecify point on wire: ")
                     {
-                        UserInputControls =
-                            UserInputControls.GovernedByOrthoMode |
-                            UserInputControls.GovernedByUCSDetect,
                     };
 
                     ppr = prompts.AcquirePoint(ppo);
@@ -47,11 +55,6 @@ namespace Addon.Jigs
                     // Obtaining a text insert point
                     ppo = new JigPromptPointOptions("\nText insertion point: ")
                     {
-                        UserInputControls =
-                            UserInputControls.GovernedByOrthoMode |
-                            UserInputControls.GovernedByUCSDetect,
-                        //UseBasePoint = true,
-                        //BasePoint = _basePoint,
                     };
 
                     ppr = prompts.AcquirePoint(ppo);
@@ -87,16 +90,8 @@ namespace Addon.Jigs
 
         protected override bool WorldDraw(WorldDraw draw)
         {
-            const double ellipseWidth = 0.082d;     // Utility.Inch_21_256   0.082d   21/256
-            const double ellipseHeight = 0.041d;    // Utility.Inch_21_512   0.041d   21/512
-            const double cornerRadius = Utility.Inch_1_16;
-            const double minLineAfterCorner = Utility.Inch_1_16;
-            const double textOffset = Utility.Inch_1_16;
-
-            Keys mods = Control.ModifierKeys;
-            var isInverse = (mods & Keys.Control) > 0;
-
-            var doc = AcadApp.DocumentManager.MdiActiveDocument;
+            //Keys mods = Control.ModifierKeys;
+            //var isInverse = (mods & Keys.Control) > 0;
 
             var geo = draw.Geometry;
             if (geo != null)
@@ -104,7 +99,7 @@ namespace Addon.Jigs
                 var xAngleDeg = _basePoint.GetVectorTo(_lastPoint).GetAngleTo(Vector3d.XAxis, Vector3d.ZAxis.Negate()) * 180 / Math.PI;
                 var isVertical = xAngleDeg > 45 && xAngleDeg < 135 || xAngleDeg > 225 && xAngleDeg < 315;
 
-                geo.PushModelTransform(doc.Editor.CurrentUserCoordinateSystem);
+                geo.PushModelTransform(AcEditor.CurrentUserCoordinateSystem);
 
                 geo.EllipticalArc(
                     center: _basePoint,
@@ -123,10 +118,10 @@ namespace Addon.Jigs
                 var isDown = _lastPoint.Y < _basePoint.Y - ellipseWidth;
 
                 var isVertDirValid =
-                    Math.Abs(_lastPoint.X - _basePoint.X) > cornerRadius + minLineAfterCorner + textOffset &&
+                    Math.Abs(_lastPoint.X - _basePoint.X) > cornerRadius + minLineAfterCorner + _textOffset &&
                     Math.Abs(_lastPoint.Y - _basePoint.Y) > ellipseWidth + cornerRadius + minLineAfterCorner;
 
-                var isHorizDirValid = Math.Abs(_lastPoint.X - _basePoint.X) > ellipseWidth + minLineAfterCorner + textOffset;
+                var isHorizDirValid = Math.Abs(_lastPoint.X - _basePoint.X) > ellipseWidth + minLineAfterCorner + _textOffset;
 
                 var isValid = isVertical
                     ? (isUp || isDown) && isVertDirValid
@@ -164,7 +159,7 @@ namespace Addon.Jigs
                         pline.AddVertexAt(2, arcEndPt, 0, 0, 0);
 
                         var lastPt = new Point2d(
-                            x: _lastPoint.X + textOffset * (isVertRight ? -1 : 1),
+                            x: _lastPoint.X + _textOffset * (isVertRight ? -1 : 1),
                             y: _lastPoint.Y
                         );
                         pline.AddVertexAt(3, lastPt, 0, 0, 0);
@@ -174,7 +169,7 @@ namespace Addon.Jigs
                     else
                     {
                         var lastPt = new Point2d(
-                            x: _lastPoint.X + textOffset * (isRight ? -1 : 1),
+                            x: _lastPoint.X + _textOffset * (isRight ? -1 : 1),
                             y: _basePoint.Y
                         );
                         pline.AddVertexAt(1, lastPt, 0, 0, 0);
@@ -194,7 +189,7 @@ namespace Addon.Jigs
                         isBackward: false,
                         isUpsideDown: false,
                         isVertical: false,
-                        isOverLined: isInverse,
+                        isOverLined: false,
                         isUnderlined: false,
                         isStrikethrough: false,
                         "EDEC Spec"
@@ -269,25 +264,53 @@ namespace Addon.Jigs
             return true;
         }
 
-        [CommandMethod("W")]
-        public static void Command()
+        private void KeywordHandle(string keyword)
         {
-            var doc = AcadApp.DocumentManager.MdiActiveDocument;
-            var ed = doc.Editor;
-            var db = doc.Database;
-
-            var jigger = new WireJig();
-            using (var tr = db.TransactionManager.StartTransaction())
+            if (keyword.Equals(KW_Offset, StringComparison.InvariantCultureIgnoreCase))
             {
-                if (jigger.Jig())
+                var pdo = new PromptDoubleOptions("\nOffset value or")
                 {
-                    //jigger.TransformEntities();
-                    tr.Commit();
-                }
-                else
+                    AllowZero = false,
+                    AllowNegative = false,
+                    UseDefaultValue = true,
+                    DefaultValue = _textOffset,
+                    Keywords =
+                    {
+                        "kw1",
+                        "kw2",
+                        "kw3",
+                    },
+                };
+
+                pdo.Keywords.Default = "kw3";
+                pdo.AllowNone = true;
+
+                var pdr = AcEditor.GetDouble(pdo);
+                if (pdr.Status == PromptStatus.OK)
                 {
-                    tr.Abort();
+                    _textOffset = pdr.Value;
                 }
+            }
+            else if (keyword.Equals(KW_Inverse, StringComparison.InvariantCultureIgnoreCase))
+            {
+                var pio = new PromptIntegerOptions("\nInverse value: ")
+                {
+                    AllowZero = false,
+                    AllowNegative = false,
+                    UseDefaultValue = true,
+                    DefaultValue = Convert.ToInt32(_inverse),
+                };
+
+                var pir = AcEditor.GetInteger(pio);
+                if (pir.Status == PromptStatus.OK)
+                {
+                    _inverse = Convert.ToBoolean(pir.Value);
+                }
+            }
+            else if (keyword.Equals(KW_Inverse2, StringComparison.InvariantCultureIgnoreCase))
+            {
+                _inverse = !_inverse;
+                AcEditor.WriteMessage($"\nInversion {(_inverse ? "ON" : "OFF")}");
             }
         }
 
@@ -299,14 +322,24 @@ namespace Addon.Jigs
                 do
                 {
                     pr = AcEditor.Drag(this);
-                    if (pr.Status == PromptStatus.OK)
-                    {
-                        if (pr is PromptPointResult ppr)
-                        {
-                            _basePoint = ppr.Value;
-                        }
 
-                        _jigFactorIndex++;
+                    switch (pr.Status)
+                    {
+                        case PromptStatus.Keyword:
+                            KeywordHandle(pr.StringResult);
+                            break;
+
+                        case PromptStatus.OK:
+                            if (pr is PromptPointResult ppr)
+                            {
+                                _basePoint = ppr.Value;
+                            }
+
+                            _jigFactorIndex++;
+                            break;
+
+                        default:
+                            break;
                     }
                 } while (
                     pr.Status != PromptStatus.Cancel &&
@@ -319,6 +352,29 @@ namespace Addon.Jigs
             catch
             {
                 return false;
+            }
+        }
+
+        [CommandMethod("W")]
+        public static void Command()
+        {
+            var doc = AcadApp.DocumentManager.MdiActiveDocument;
+            var db = doc.Database;
+
+            var jigger = new WireJig();
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                try
+                {
+                    if (jigger.Jig())
+                        tr.Commit();
+                    else
+                        tr.Abort();
+                }
+                catch (System.Exception)
+                {
+                    tr.Abort();
+                }
             }
         }
     }
