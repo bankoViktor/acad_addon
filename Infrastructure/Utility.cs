@@ -10,12 +10,13 @@ namespace Addon.Infrastructure
     {
         private const string OrthModeVarName = "ORTHOMODE";
 
-        public const double Inch_1_2 = 0.5d;
-        public const double Inch_1_4 = 0.25d;
-        public const double Inch_1_8 = 0.125d;
-        public const double Inch_1_16 = 0.0625d;
-        public const double Inch_1_32 = 0.03125d;
-        public const double Inch_1_64 = 0.015625d;
+        public const double Inch_1_2 = 0.5;
+        public const double Inch_1_4 = 0.25;
+        public const double Inch_1_8 = 0.125;
+        public const double Inch_1_16 = 0.0625;
+        public const double Inch_1_32 = 0.03125;
+        public const double Inch_1_64 = 0.015625;
+
         public static void AddBlockDefinitionFromDwg(Database db, string blockPath)
         {
             var blkDb = new Database(false, true);

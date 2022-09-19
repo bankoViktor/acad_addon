@@ -314,20 +314,6 @@ namespace Addon.Commands
             }
         }
 
-        [CommandMethod("TEST3")]
-        public static void TestEntityJigger2_Method()
-        {
-            var ed = AcadApp.DocumentManager.MdiActiveDocument.Editor;
-            if (WireLabelJig.Jig())
-            {
-                ed.WriteMessage("\nA line segment has been successfully jigged and added to the database.\n");
-            }
-            else
-            {
-                ed.WriteMessage("\nIt failed to jig and add a line segment to the database.\n");
-            }
-        }
-
         /*
         [CommandMethod("bat_bc")]
         public static void Sub16()
