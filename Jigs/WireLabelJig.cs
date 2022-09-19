@@ -157,6 +157,23 @@ namespace Addon.Jigs
                     tiltDegreeInRads: Utility.DegreesToRadians(_jigStageIndex > 1 && isVertical ? 90 : 0),
                     arcType: ArcType.ArcSimple
                 );
+                if (_line != null)
+                {
+                    var closestPt = _line.GetClosestPointTo(_acquirePoint, false);
+                    var onLine =
+                        Math.Abs(closestPt.X - _acquirePoint.X) <= MarkTolerance &&
+                        Math.Abs(closestPt.Y - _acquirePoint.Y) <= MarkTolerance;
+
+                    //DrawPoint(draw, closestPt, (short)(onLine ? 3 : 10), Utility.Inch_1_16);
+
+                    var lineIsHorizontal = _line.StartPoint.Y == _line.EndPoint.Y;
+                    var lineIsVertical = _line.StartPoint.X == _line.EndPoint.X;
+                    var markIsValid = onLine && (lineIsVertical || lineIsHorizontal);
+                    if (markIsValid)
+                    {
+                        DrawBaseMark(geo, closestPt, lineIsHorizontal);
+                    }
+                }
 
                 var isLeft = isVertical
                     ? _lastPoint.X <= _basePoint.X - CornerRadius - _minHorizLine + Tolerance.Global.EqualPoint
@@ -284,6 +301,28 @@ namespace Addon.Jigs
             }
 
             return true;
+        }
+
+        private Line _line;
+
+        private void PointMonitorCallback(object sender, PointMonitorEventArgs e)
+        {
+            var entities = e.Context.GetPickedEntities();
+            if (entities.Length > 0)
+            {
+                var ids = entities.FirstOrDefault().GetObjectIds();
+                if (ids.Length > 0)
+                {
+                    var id = ids[0];
+                    if (id.ObjectClass.DxfName == "LINE" && (_line == null || _line != null && _line.Id != id))
+                    {
+                        using (var tr = AcadApp.DocumentManager.CurrentDocument.Database.TransactionManager.StartTransaction())
+                        {
+                            _line = tr.GetObject(id, OpenMode.ForRead) as Line;
+                        }
+                    }
+                }
+            }
         }
 
         private TextStyle GetTextStyle(string name) => new TextStyle(
