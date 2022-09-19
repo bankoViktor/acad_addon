@@ -72,7 +72,7 @@ namespace Addon.Jigs
                     // Obtaining an insert point
                     ppo = new JigPromptPointOptions("\nSpecify point on wire: ")
                     {
-                        UserInputControls = UserInputControls.GovernedByOrthoMode | UserInputControls.GovernedByUCSDetect,
+                        UserInputControls = UserInputControls.GovernedByUCSDetect,
                         Keywords =
                         {
                             _kwCornerRadius,
