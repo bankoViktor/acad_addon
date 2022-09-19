@@ -18,7 +18,6 @@ namespace Addon.Jigs
         private const string _kwCornerRadius = "Radius";
         private const string _kwNoText = "noText";
         private const string _kwText = "Text";
-        private const string _kwMultilabel = "Multilabel";
 
         /// <summary>
         /// Base point on wire (center ellipse point).
@@ -70,20 +69,23 @@ namespace Addon.Jigs
             {
                 case 1:
                     // Obtaining an insert point
-                    ppo = new JigPromptPointOptions("\nSpecify point on wire: ")
+                    ppo = new JigPromptPointOptions("\nSpecify point on wire or ")
                     {
                         UserInputControls = UserInputControls.GovernedByUCSDetect,
                         Keywords =
                         {
                             _kwCornerRadius,
                             IsNoText ? _kwText : _kwNoText,
-                            //_kwMultilabel,
                         },
                     };
 
+                    // Acquire base point
                     ppr = prompts.AcquirePoint(ppo);
-                    if (ppr.Status == PromptStatus.Cancel && ppr.Status == PromptStatus.Error)
+                    if (ppr.Status == PromptStatus.Cancel &&
+                        ppr.Status == PromptStatus.Error)
+                    {
                         return SamplerStatus.Cancel;
+                    }
 
                     _basePoint = ppr.Value;
 
@@ -93,17 +95,21 @@ namespace Addon.Jigs
                     // Obtaining a text insert point
                     ppo = new JigPromptPointOptions("\nText insertion point: ")
                     {
+                        UserInputControls = UserInputControls.GovernedByUCSDetect,
                         Keywords =
                         {
                             _kwCornerRadius,
                             IsNoText ? _kwText : _kwNoText,
-                            //_kwMultilabel,
                         },
                     };
 
+                    // Acquire target point
                     ppr = prompts.AcquirePoint(ppo);
-                    if (ppr.Status == PromptStatus.Cancel && ppr.Status == PromptStatus.Error)
+                    if (ppr.Status == PromptStatus.Cancel &&
+                        ppr.Status == PromptStatus.Error)
+                    {
                         return SamplerStatus.Cancel;
+                    }
 
                     var pt = ppr.Value;
 
@@ -320,10 +326,6 @@ namespace Addon.Jigs
                 IsNoText = !IsNoText;
                 AcEditor.WriteMessage($"\nText {(IsNoText ? "OFF" : "ON")}");
             }
-            else if (keyword.Equals(_kwMultilabel, StringComparison.InvariantCultureIgnoreCase))
-            {
-                AcEditor.WriteMessage($"\nMultilabel mode");
-            }
         }
 
         private bool Jig()
@@ -370,9 +372,9 @@ namespace Addon.Jigs
         [CommandMethod("W")]
         public static void Command()
         {
-            var doc = AcadApp.DocumentManager.MdiActiveDocument;
-            var ed = doc.Editor;
-            var db = doc.Database;
+            //var doc = AcadApp.DocumentManager.MdiActiveDocument;
+            //var ed = doc.Editor;
+            //var db = doc.Database;
 
             var jigger = new WireLabelJig();
             if (jigger.Jig())
