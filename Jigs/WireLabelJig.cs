@@ -4,6 +4,8 @@ using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.GraphicsInterface;
 using Autodesk.AutoCAD.Runtime;
 using System;
+using System.Collections.Generic;
+using System.Windows.Forms;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 namespace Addon.Jigs
@@ -15,19 +17,26 @@ namespace Addon.Jigs
         private const double _minHorizLine = Utility.Inch_1_16;
         private const double _minVertLine = Utility.Inch_1_16;
         private const string _textStyleName = "EDEC 0.1";
+
         private const string _kwCornerRadius = "Radius";
         private const string _kwNoText = "noText";
         private const string _kwText = "Text";
 
+
+        //private List<Point3d> _basePoints = new List<Point3d>();
+
         /// <summary>
         /// Base point on wire (center ellipse point).
         /// </summary>
-        private Point3d _basePoint;
+        //private Point3d _lastBasePoint => _basePoints.Count > 1
+        //    ? _basePoints[_basePoints.Count - 1]
+        //    : default;
 
         /// <summary>
         /// Current cursor point.
         /// </summary>
-        private Point3d _lastPoint;
+        //private Point3d _basePoint;
+        private Point3d _currentPoint;
 
         /// <summary>
         /// Total stages of JIG.
@@ -38,6 +47,11 @@ namespace Addon.Jigs
         /// Current stage of JIG.
         /// </summary>
         private int _jigStageIndex = 1;
+
+        /// <summary>
+        /// Target points list.
+        /// </summary>
+        //private List<Point3d> _targetPoints = new List<Point3d>();
 
         /// <summary>
         /// Radius of corner annotation line.
@@ -57,13 +71,22 @@ namespace Addon.Jigs
         /// <summary>
         /// Autocad Current Document Editor.
         /// </summary>
-        private Editor AcEditor => AcadApp.DocumentManager.MdiActiveDocument.Editor;
+        private static Editor AcEditor => AcadApp.DocumentManager.MdiActiveDocument.Editor;
 
+
+        private Point3d _acquirePoint = default;
+        private List<Point3d> _basePoints = new List<Point3d>();
+        private Point3d _basePoint => _basePoints[_basePoints.Count - 1];
 
         protected override SamplerStatus Sampler(JigPrompts prompts)
         {
             JigPromptPointOptions ppo;
             PromptPointResult ppr;
+
+            //var mods = Control.ModifierKeys;
+            //var isControl = (mods & Keys.Control) > 0;
+
+            //var stage = isControl ? 1 : _jigStageIndex;
 
             switch (_jigStageIndex)
             {
@@ -87,13 +110,12 @@ namespace Addon.Jigs
                         return SamplerStatus.Cancel;
                     }
 
-                    _basePoint = ppr.Value;
-
+                    _acquirePoint = ppr.Value;
                     return SamplerStatus.OK;
 
                 case 2:
                     // Obtaining a text insert point
-                    ppo = new JigPromptPointOptions("\nText insertion point: ")
+                    ppo = new JigPromptPointOptions("\nSpecify end point (hold Ctrl to mark multiple wires) or ")
                     {
                         UserInputControls = UserInputControls.GovernedByUCSDetect,
                         Keywords =
@@ -111,31 +133,25 @@ namespace Addon.Jigs
                         return SamplerStatus.Cancel;
                     }
 
-                    var pt = ppr.Value;
-
-                    //if (Utility.IsOrthogonal)
-                    //{
-                    //    pt = Utility.GetOrthoPoint(_basePoint, pt);
-                    //}
-
-                    //var pio = new PromptIntegerOptions("\nCount: ")
-                    //{
-                    //    UpperLimit = 10,
-                    //    LowerLimit = 1,
-                    //    DefaultValue = 1,
-                    //};
-                    //var pir = AcEditor.GetInteger(pio);
-                    //if (pir.Status != PromptStatus.OK)
-                    //{
-                    //    AcEditor.WriteMessage($"\nNumber = {pir.Value}");
-                    //}
-
-                    _lastPoint = pt;
-
+                    _acquirePoint = ppr.Value;
                     return SamplerStatus.OK;
             }
 
             return SamplerStatus.OK;
+        }
+
+        private void DrawBaseMark(WorldGeometry wg, Point3d point, bool isVertical)
+        {
+            wg.EllipticalArc(
+                center: point,
+                normal: Vector3d.ZAxis,
+                majorAxisLength: _ellipseWidth,
+                minorAxisLength: -_ellipseHeight,
+                startDegreeInRads: Utility.DegreesToRadians(120),
+                endDegreeInRads: Utility.DegreesToRadians(60),
+                tiltDegreeInRads: Utility.DegreesToRadians(isVertical ? 90 : 0), // _jigStageIndex > 1 && 
+                arcType: ArcType.ArcSimple
+            );
         }
 
         protected override bool WorldDraw(WorldDraw draw)
@@ -143,50 +159,46 @@ namespace Addon.Jigs
             var geo = draw.Geometry;
             if (geo != null)
             {
-                var isVertical = Math.Abs(_basePoint.Y - _lastPoint.Y) > _ellipseWidth + _minVertLine + CornerRadius - Tolerance.Global.EqualPoint;
+                var isVertical = Math.Abs(_acquirePoint.Y - _currentPoint.Y) > _ellipseWidth + _minVertLine + CornerRadius - Tolerance.Global.EqualPoint;
+
+                // Control Key Pressed
+                var mods = Control.ModifierKeys;
+                var isControl = (mods & Keys.Control) > 0;
 
                 geo.PushModelTransform(AcEditor.CurrentUserCoordinateSystem);
 
-                geo.EllipticalArc(
-                    center: _basePoint,
-                    normal: Vector3d.ZAxis,
-                    majorAxisLength: _ellipseWidth,
-                    minorAxisLength: -_ellipseHeight,
-                    startDegreeInRads: Utility.DegreesToRadians(120),
-                    endDegreeInRads: Utility.DegreesToRadians(60),
-                    tiltDegreeInRads: Utility.DegreesToRadians(_jigStageIndex > 1 && isVertical ? 90 : 0),
-                    arcType: ArcType.ArcSimple
-                );
-                if (_line != null)
+                // TODO Annotation Layer
+                //draw.SubEntityTraits.Color = 10;
+
+                // Get line under point
+                if (_jigStageIndex == 1 || isControl)
                 {
-                    var closestPt = _line.GetClosestPointTo(_acquirePoint, false);
-                    var onLine =
-                        Math.Abs(closestPt.X - _acquirePoint.X) <= MarkTolerance &&
-                        Math.Abs(closestPt.Y - _acquirePoint.Y) <= MarkTolerance;
-
-                    //DrawPoint(draw, closestPt, (short)(onLine ? 3 : 10), Utility.Inch_1_16);
-
-                    var lineIsHorizontal = _line.StartPoint.Y == _line.EndPoint.Y;
-                    var lineIsVertical = _line.StartPoint.X == _line.EndPoint.X;
-                    var markIsValid = onLine && (lineIsVertical || lineIsHorizontal);
-                    if (markIsValid)
-                    {
-                        DrawBaseMark(geo, closestPt, lineIsHorizontal);
-                    }
+                    DrawBaseMark(geo, _acquirePoint, isVertical);
                 }
 
+                foreach (var basePoint in _basePoints)
+                {
+                    DrawBaseMark(geo, basePoint, isVertical);
+                }
+
+                #region Comment
+
+                /*
+
                 var isLeft = isVertical
-                    ? _lastPoint.X <= _basePoint.X - CornerRadius - _minHorizLine + Tolerance.Global.EqualPoint
-                    : _lastPoint.X <= _basePoint.X - _ellipseWidth - _minHorizLine + Tolerance.Global.EqualPoint;
+                    ? _currentPoint.X <= _basePoint.X - CornerRadius - _minHorizLine + Tolerance.Global.EqualPoint
+                    : _currentPoint.X <= _basePoint.X - _ellipseWidth - _minHorizLine + Tolerance.Global.EqualPoint;
                 var isRight = isVertical
-                    ? _lastPoint.X > _basePoint.X + CornerRadius + _minHorizLine - Tolerance.Global.EqualPoint
-                    : _lastPoint.X >= _basePoint.X + _ellipseWidth + _minHorizLine - Tolerance.Global.EqualPoint;
+                    ? _currentPoint.X > _basePoint.X + CornerRadius + _minHorizLine - Tolerance.Global.EqualPoint
+                    : _currentPoint.X >= _basePoint.X + _ellipseWidth + _minHorizLine - Tolerance.Global.EqualPoint;
                 var isValid = isRight || isLeft;
 
                 if (_jigStageIndex > 1 && isValid)
                 {
-                    var isUp = _lastPoint.Y >= _basePoint.Y + _ellipseWidth + _minVertLine + CornerRadius;
-                    var isDown = _lastPoint.Y <= _basePoint.Y - _ellipseWidth - _minVertLine - CornerRadius;
+                    
+
+                    var isUp = _currentPoint.Y >= _basePoint.Y + _ellipseWidth + _minVertLine + CornerRadius;
+                    var isDown = _currentPoint.Y <= _basePoint.Y - _ellipseWidth - _minVertLine - CornerRadius;
 
                     var pline = new Autodesk.AutoCAD.DatabaseServices.Polyline();
                     var segments = 1;
@@ -201,7 +213,7 @@ namespace Addon.Jigs
                     {
                         var arcBeginPt = new Point2d(
                             x: _basePoint.X,
-                            y: _lastPoint.Y + CornerRadius * (isUp ? -1 : 1)
+                            y: _currentPoint.Y + CornerRadius * (isUp ? -1 : 1)
                         );
 
                         var bulge = Math.Tan(Utility.DegreesToRadians(90) / 4) * (isUp && isRight || isDown && isLeft ? -1 : 1);
@@ -209,13 +221,13 @@ namespace Addon.Jigs
 
                         var arcEndPt = new Point2d(
                             x: _basePoint.X + CornerRadius * (isRight ? 1 : -1),
-                            y: _lastPoint.Y
+                            y: _currentPoint.Y
                         );
                         pline.AddVertexAt(2, arcEndPt, 0, 0, 0);
 
                         var lastPt = new Point2d(
-                            x: _lastPoint.X,
-                            y: _lastPoint.Y
+                            x: _currentPoint.X,
+                            y: _currentPoint.Y
                         );
                         pline.AddVertexAt(3, lastPt, 0, 0, 0);
 
@@ -224,7 +236,7 @@ namespace Addon.Jigs
                     else
                     {
                         var lastPt = new Point2d(
-                            x: _lastPoint.X,
+                            x: _currentPoint.X,
                             y: _basePoint.Y
                         );
                         pline.AddVertexAt(1, lastPt, 0, 0, 0);
@@ -240,20 +252,21 @@ namespace Addon.Jigs
                         var text = "LABEL";
                         var extents = textStyle.ExtentsBox(text, false, true, draw);
                         var x = isRight
-                            ? _lastPoint.X - extents.MinPoint.X + TextOffset
-                            : _lastPoint.X - extents.MaxPoint.X - TextOffset;
+                            ? _currentPoint.X - extents.MinPoint.X + TextOffset
+                            : _currentPoint.X - extents.MaxPoint.X - TextOffset;
                         var y = isVertical
-                            ? _lastPoint.Y
+                            ? _currentPoint.Y
                             : _basePoint.Y;
                         var textPoint = new Point3d(
                             x: x,
                             y: y - textStyle.TextSize / 2,
-                            z: _lastPoint.Z
+                            z: _currentPoint.Z
                         );
 
                         geo.Text(textPoint, Vector3d.ZAxis, Vector3d.XAxis, text, true, textStyle);
                     }
                 }
+                */
 
                 //TextStyleTableRecord edec01textStyle;
 
@@ -297,32 +310,23 @@ namespace Addon.Jigs
                 //    }
                 //);
 
+                #endregion
+
                 geo.PopModelTransform();
             }
 
             return true;
         }
 
-        private Line _line;
-
-        private void PointMonitorCallback(object sender, PointMonitorEventArgs e)
+        private void DrawPoint(WorldDraw wd, Point3d point, short color, double size = Utility.Inch_1_64)
         {
-            var entities = e.Context.GetPickedEntities();
-            if (entities.Length > 0)
-            {
-                var ids = entities.FirstOrDefault().GetObjectIds();
-                if (ids.Length > 0)
-                {
-                    var id = ids[0];
-                    if (id.ObjectClass.DxfName == "LINE" && (_line == null || _line != null && _line.Id != id))
-                    {
-                        using (var tr = AcadApp.DocumentManager.CurrentDocument.Database.TransactionManager.StartTransaction())
-                        {
-                            _line = tr.GetObject(id, OpenMode.ForRead) as Line;
-                        }
-                    }
-                }
-            }
+            var oldColor = wd.SubEntityTraits.Color;
+            wd.SubEntityTraits.Color = color;
+
+            wd.Geometry.WorldLine(new Point3d(point.X - size, point.Y, point.Z), new Point3d(point.X + size, point.Y, point.Z));
+            wd.Geometry.WorldLine(new Point3d(point.X, point.Y - size, point.Z), new Point3d(point.X, point.Y + size, point.Z));
+
+            wd.SubEntityTraits.Color = oldColor;
         }
 
         private TextStyle GetTextStyle(string name) => new TextStyle(
@@ -382,15 +386,22 @@ namespace Addon.Jigs
                             break;
 
                         case PromptStatus.OK:
-                            if (pr is PromptPointResult ppr)
+                            var mods = Control.ModifierKeys;
+                            var isControl = (mods & Keys.Control) > 0;
+
+                            if (_jigStageIndex == 1 || _jigStageIndex > 1 && isControl)
                             {
-                                _basePoint = ppr.Value;
+                                if (pr is PromptPointResult ppr)
+                                {
+                                    _basePoints.Add(ppr.Value);
+                                }
                             }
 
-                            _jigStageIndex++;
-                            break;
+                            if (_jigStageIndex == 1 || _jigStageIndex > 1 && !isControl)
+                            {
+                                _jigStageIndex++;
+                            }
 
-                        default:
                             break;
                     }
                 } while (
